@@ -1,0 +1,12 @@
+.memorax-code/
+.repo_memory/
+.agents/
+.codex/
+node_modules/
+*.zip
+*.log
+.env
+.env.*
+!.env.example
+preview*.png
+qa-*.png

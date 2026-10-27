@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#121a1c">
+  <title>装甲前线 · TANK FIELD</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="./" aria-label="装甲前线首页"><svg viewBox="0 0 40 36" aria-hidden="true"><path d="M5 12h26v17H5zM11 8h13v17H11zM19 4h5v15h-5zM2 10h5v22H2zM30 10h5v22h-5z" fill="currentColor"/><path d="M13 15h12v9H13z" fill="#121a1c"/></svg><strong>TANK<span>FIELD</span></strong><i></i><span class="brand-cn">装甲前线</span></a>
+    <nav aria-label="主导航"><button class="nav-link active" id="lobby-nav">作战大厅</button><button class="nav-link" id="guide-button">操作指南 <span>↗</span></button></nav>
+    <div class="header-actions"><span class="version">FIELD BUILD / 02</span><button class="icon-button" id="sound-button" title="开启音效" aria-label="开启音效">♪<span class="slash">╱</span></button><button class="icon-button" id="fullscreen-button" title="全屏" aria-label="全屏">⛶</button></div>
+  </header>
+  <main>
+    <section class="intro"><div><div class="eyebrow"><span class="little-line"></span> MULTIPLAYER TANK ARENA</div><h1>战场随时重构<span>，</span>战斗永不结束<span>。</span></h1></div><div class="connection"><span class="status-dot"></span><span id="connection-label">本地引擎就绪</span><span class="connection-sub" id="connection-sub">准备部署 / READY</span></div></section>
+    <div class="game-layout">
+      <section class="arena-panel" aria-label="坦克战场">
+        <div class="arena-toolbar"><div class="map-label"><span class="status-dot"></span><span id="map-name">荒原前哨</span><span class="map-tag" id="mode-label">训练模式</span></div><div class="arena-meta"><span>关卡 <b id="wave-value">01</b></span><span>敌军 <b id="enemy-value">—</b></span><button id="pause-button" class="small-button" title="暂停 / Esc" aria-label="暂停">Ⅱ</button></div></div>
+        <div class="canvas-wrap" id="canvas-wrap">
+          <canvas id="battlefield" width="1280" height="800" tabindex="0" aria-label="坦克大战：WASD 移动，鼠标瞄准，按住左键射击"></canvas>
+          <div class="field-top-label"><span>LIVE BATTLEFIELD</span><span id="seed-label">SECTOR 01 / 1280 × 800</span></div>
+          <div id="wave-banner" class="wave-banner hidden"></div>
+          <div id="respawn-banner" class="respawn-banner hidden"></div>
+          <div class="field-bottom-label"><span><i></i> 战术地图实时生成</span><span>保持机动 · 利用掩体</span></div>
+          <div class="lobby-overlay" id="lobby">
+            <div class="lobby-card"><div class="card-corners"></div><div class="eyebrow"><span class="status-dot"></span> OPERATION: ENDLESS</div><h2>下一场胜利，<br>由你开火<span>。</span></h2><p class="lobby-description">驶入随机战场，突破层层包围。<br>一个人练习，或与朋友并肩作战。</p><div class="vehicle-picker"><label class="input-label" for="vehicle-select">选择战车 <span>4 款可用</span></label><select id="vehicle-select" aria-describedby="vehicle-details vehicle-description"></select><div id="vehicle-details" class="vehicle-details"></div><p id="vehicle-description" class="vehicle-description"></p></div><div class="mode-tabs" role="tablist" aria-label="游戏模式"><button id="solo-tab" role="tab" aria-selected="true" class="selected">单人演练</button><button id="multi-tab" role="tab" aria-selected="false">多人合作 <span>1–4</span></button></div><div id="solo-form"><button class="primary-button" id="start-button">部署战车 <span>↗</span></button><div class="lobby-note">随机战场 / 无限关卡 / 即刻开战</div></div><div id="multi-form" class="hidden"><label class="input-label" for="player-name">你的呼号</label><input id="player-name" maxlength="16" value="指挥官" autocomplete="nickname" placeholder="输入昵称"><div class="multiplayer-actions"><button class="primary-button" id="host-button">创建房间 <span>＋</span></button><button class="secondary-button" id="show-join-button">加入房间</button></div><div id="join-form" class="join-form hidden"><input id="room-code" maxlength="8" aria-label="房间代码" placeholder="输入房间代码" autocomplete="off"><button class="primary-button" id="join-button">加入 →</button></div><p class="lobby-note">分享游戏地址与房间代码，邀请朋友加入</p></div><p id="lobby-error" class="error-message" role="alert"></p></div>
+          </div>
+          <div class="pause-overlay hidden" id="pause-overlay"><div class="pause-card"><div class="eyebrow">TACTICAL PAUSE</div><h2>战术休整</h2><p id="pause-description">深呼吸，下一发命中目标。</p><button class="primary-button" id="resume-button">继续作战 <span>→</span></button><button class="text-button" id="exit-button">返回作战大厅</button></div></div>
+        </div>
+        <div class="controls-strip"><div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><span>移动</span></div><div><svg width="15" height="19" viewBox="0 0 15 19" aria-hidden="true"><rect x="1" y="1" width="13" height="17" rx="6" fill="none" stroke="currentColor"/><path d="M7.5 1v7M1 8h13" stroke="currentColor"/></svg><span>瞄准 / 左键开火</span></div><div><kbd>ESC</kbd><span>暂停</span></div><span class="controls-end">消灭敌军，自动进入下一关 <span>↗</span></span></div>
+      </section>
+      <aside class="sidebar">
+        <section class="status-card player-card"><div class="section-label"><h3>你的战车</h3><span id="tank-id">M—01</span></div><div class="vehicle-preview"><canvas id="tank-preview" width="240" height="110" aria-label="绿色主战坦克"></canvas><div><strong id="player-label">先锋</strong><span id="vehicle-code">VANGUARD / M01</span></div><span class="vehicle-badge" id="vehicle-badge">主战型</span></div><div class="health-label"><span>装甲耐久</span><strong id="health-value">100 <small>/ 100</small></strong></div><div class="health-track"><div id="health-bar"></div></div><div class="stats-grid"><div><span>累计击毁</span><strong id="kills-value">00</strong></div><div><span>作战时间</span><strong id="time-value">00:00</strong></div></div></section>
+        <section class="status-card buffs-card"><div class="section-label"><h3>作战增益</h3><span class="tiny-dot"></span></div><div id="buffs-list" class="buffs-list"><div class="empty-buff"><span>＋</span><div>等待补给<small>驶过道具即可自动拾取</small></div></div></div></section>
+        <section class="status-card squad-card"><div class="section-label"><h3>作战小队</h3><span id="squad-count">01 / 04</span></div><div id="squad-list"><div class="squad-row"><span class="avatar-dot"></span><span>指挥官 <small>你</small></span><span class="squad-status">待命</span></div></div><button id="room-button" class="room-button"><span>＋</span> 邀请朋友一起作战</button></section>
+        <section class="tactical-note"><span class="tip-symbol">✳</span><div><h3>战地手册 <span>01</span></h3><p id="tactical-tip">砖墙可以被炮弹击碎。<br>开辟一条属于你的进攻路线。</p></div></section>
+      </aside>
+    </div>
+    <section class="supply-section"><div class="supply-heading"><h2>战场补给</h2><span>拾取即生效，扭转战局。</span></div><div class="supply-grid"><div class="supply-item"><span class="supply-icon repair">＋</span><div><strong>战地维修</strong><span>恢复 40 点装甲</span></div><span class="supply-index">01</span></div><div class="supply-item"><span class="supply-icon shield">⬡</span><div><strong>能量护盾</strong><span>抵御伤害 · 5 秒</span></div><span class="supply-index">02</span></div><div class="supply-item"><span class="supply-icon rapid">ϟ</span><div><strong>极速连射</strong><span>提升射速 · 5 秒</span></div><span class="supply-index">03</span></div><div class="supply-item"><span class="supply-icon spread">⋔</span><div><strong>三重火力</strong><span>散射火力 · 5 秒</span></div><span class="supply-index">04</span></div><div class="supply-item"><span class="supply-icon speed">»</span><div><strong>涡轮加速</strong><span>移动加速 · 5 秒</span></div><span class="supply-index">05</span></div></div></section>
+    <footer><span><i></i> 每一次出发，都是全新的战场。</span><span>BUILT FOR THE NEXT ROUND <span>↗</span></span></footer>
+  </main>
+  <dialog id="guide-dialog"><button class="dialog-close icon-button" id="close-guide" aria-label="关闭指南">×</button><div class="eyebrow">FIELD MANUAL / 01</div><h2>指挥官，欢迎入队。</h2><p>清除所有敌军后，战场会重新生成。关卡无限循环，敌人逐渐增强。</p><dl><dt>W A S D / 方向键</dt><dd>移动战车，可斜向移动。</dd><dt>鼠标移动 + 按住左键</dt><dd>独立旋转炮塔，持续射击。空格也可开火。</dd><dt>Esc / P</dt><dd>单人暂停；联机打开菜单，战斗继续。</dd><dt>四款战车</dt><dd>部署前选择先锋、游隼、堡垒或雷鸣。不同战车拥有不同装甲、速度与火力，单人和多人模式均可使用。</dd><dt>战场补给</dt><dd>驶过自动拾取；护盾、连射、散射、加速均持续 5 秒。阵亡后等待队友清场，或全队阵亡 3 秒后重开本关。</dd><dt>多人合作</dt><dd>朋友访问相同游戏服务器地址，再输入房间代码。支持局域网或服务器联机，最多 4 人共同闯关，队友之间没有友伤。</dd></dl><button id="guide-ready" class="primary-button">收到，准备作战 <span>→</span></button></dialog>
+  <div id="toast" class="toast hidden" role="status"></div>
+  <script src="config.js"></script><script src="engine.js"></script><script src="network.js"></script><script src="game.js"></script>
+</body>
+</html>
