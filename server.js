@@ -7,6 +7,7 @@ const crypto = require('node:crypto');
 const os = require('node:os');
 
 const ROOT = __dirname;
+const C = require('./config.js'), N = C.network;
 const COLORS = ['#c1dd67', '#70c5e5', '#e3b66c', '#be9ee8'];
 const STATIC_FILES = new Map([
   ['/', ['index.html', 'text/html; charset=utf-8']],
@@ -15,6 +16,7 @@ const STATIC_FILES = new Map([
   ['/game.js', ['game.js', 'text/javascript; charset=utf-8']],
   ['/engine.js', ['engine.js', 'text/javascript; charset=utf-8']],
   ['/network.js', ['network.js', 'text/javascript; charset=utf-8']],
+  ['/touch.js', ['touch.js', 'text/javascript; charset=utf-8']],
   ['/config.js', ['config.js', 'text/javascript; charset=utf-8']],
 ]);
 
@@ -22,10 +24,10 @@ const STATIC_FILES = new Map([
 function createGameServer(options = {}) {
   const engine = options.engine || require('./engine.js');
   const rooms = new Map();
-  const disconnectGraceMs = options.disconnectGraceMs ?? 15000;
-  const roomLifetimeMs = options.roomLifetimeMs ?? 60000;
-  const inputTimeoutMs = options.inputTimeoutMs ?? 350;
-  const maxRooms = options.maxRooms ?? 64;
+  const disconnectGraceMs = options.disconnectGraceMs ?? N.disconnectGraceMs;
+  const roomLifetimeMs = options.roomLifetimeMs ?? N.roomLifetimeMs;
+  const inputTimeoutMs = options.inputTimeoutMs ?? N.inputTimeoutMs;
+  const maxRooms = options.maxRooms ?? N.maxRooms;
   let simulationTimer;
   let broadcastTimer;
 
@@ -49,7 +51,7 @@ function createGameServer(options = {}) {
       let size = 0;
       req.on('data', chunk => {
         size += chunk.length;
-        if (size > 2048) {
+        if (size > N.bodyLimit) {
           reject(Object.assign(new Error('请求内容过长。'), {status: 413}));
           return;
         }
@@ -71,11 +73,11 @@ function createGameServer(options = {}) {
 
   function cleanName(value) {
     const name = typeof value === 'string' ? value.replace(/[\u0000-\u001f\u007f]/g, '').trim() : '';
-    return Array.from(name || '坦克指挥官').slice(0, 16).join('');
+    return Array.from(name || '坦克指挥官').slice(0, C.nameLength).join('');
   }
 
   function addPlayer(room, name, vehicle) {
-    if (room.players.size >= 4) throw Object.assign(new Error('房间已满，最多支持 4 位玩家。'), {status: 409});
+    if (room.players.size >= C.maxPlayers) throw Object.assign(new Error('房间已满，最多支持 4 位玩家。'), {status: 409});
     const id = crypto.randomBytes(8).toString('hex');
     const token = crypto.randomBytes(24).toString('hex');
     const usedColors = new Set([...room.players.values()].map(p => p.color));
@@ -111,10 +113,11 @@ function createGameServer(options = {}) {
     return {...state, protocol: optimized ? 2 : 1, frame: room.frame,
       roomCode: room.code,
       onlineCount: room.players.size,
+      acks: Object.fromEntries([...room.players.values()].map(p => [p.id,p.appliedSeq ?? -1])),
       players: [...room.players.values()].map(({id, name, color, vehicle}) => ({id, name, color, vehicle}))};
   }
 
-  const encode = state => `data: ${JSON.stringify(state, (key, value) => typeof value === 'number' && !Number.isInteger(value) ? Math.round(value * 1000) / 1000 : value)}\n\n`;
+  const encode = state => `data: ${JSON.stringify(state, (key, value) => typeof value === 'number' && !Number.isInteger(value) ? Math.round(value * N.precision) / N.precision : value)}\n\n`;
 
   function writeFrame(room) {
     if (![...room.players.values()].some(p => p.stream)) return;
@@ -122,23 +125,40 @@ function createGameServer(options = {}) {
     const state = snapshot(room, true);
     // Serialize once per room. Terrain only travels when joining or when a wall changes.
     const delta = encode(state);
-    let full, legacy;
+    let full, legacy, modern, patched;
+    const previous = room.terrain;
+    let patch;
+    if (previous && previous.round === room.game.round && previous.revision !== room.game.terrainRevision) {
+      const current = new Map(room.game.walls.map(w => [w.id,w]));
+      patch = {base: previous.revision, removed: [...previous.walls.keys()].filter(id => !current.has(id)),
+        upserts: room.game.walls.filter(w => !previous.walls.has(w.id) || previous.walls.get(w.id).hp !== w.hp)};
+    }
     for (const player of room.players.values()) {
       if (!player.stream) continue;
       if (player.stream.writableLength > 0) {
         player.blockedAt ||= Date.now();
-        if (Date.now() - player.blockedAt > 500) player.stream.destroy();
+        if (Date.now() - player.blockedAt > N.slowClientMs) player.stream.destroy();
         continue;
       }
       player.blockedAt = 0;
-      if (player.protocol !== 2) {
+      if (player.protocol === 1) {
         legacy ||= encode(snapshot(room)); player.stream.write(legacy); continue;
       }
       if (player.terrainRevision !== room.game.terrainRevision) {
-        full ||= encode({...state, walls: room.game.walls});
-        player.stream.write(full); player.terrainRevision = room.game.terrainRevision;
+        if (player.protocol === 3 && patch && player.terrainRevision === patch.base) {
+          patched ||= encode({...state,protocol:3,terrainPatch:patch}); player.stream.write(patched);
+        } else {
+          full ||= encode({...state,walls:room.game.walls}); player.stream.write(full);
+        }
+        player.terrainRevision = room.game.terrainRevision;
+      } else if (player.protocol === 3) {
+        modern ||= encode({...state,protocol:3}); player.stream.write(modern);
       } else player.stream.write(delta);
     }
+    if (!previous || previous.revision !== room.game.terrainRevision) room.terrain = {
+      round:room.game.round,revision:room.game.terrainRevision,
+      walls:new Map(room.game.walls.map(w => [w.id,{...w}]))
+    };
     room.lastEventSerial = Number(room.game.events.at(-1)?.id.slice(2)) || room.lastEventSerial;
   }
 
@@ -163,7 +183,7 @@ function createGameServer(options = {}) {
         if (rooms.size >= maxRooms) return json(res, 503, {error: '服务器房间已满，请稍后再试。'});
         let code;
         do { code = crypto.randomBytes(3).toString('hex').toUpperCase(); } while (rooms.has(code));
-        const room = {code, game: engine.createGame({seed: crypto.randomInt(1, 2147483647)}),
+        const room = {code, game: engine.createGame({seed: crypto.randomInt(1, 2147483647), multiplayer: true}),
           players: new Map(), lastOccupiedAt: Date.now(), frame: 0, lastEventSerial: 0};
         rooms.set(code, room);
         return json(res, 201, addPlayer(room, body.name, body.vehicle));
@@ -179,16 +199,16 @@ function createGameServer(options = {}) {
           if (player.stream) player.stream.end();
           player.stream = res;
           player.disconnectedAt = null;
-          player.protocol = url.searchParams.get('v') === '2' ? 2 : 1;
+          player.protocol = ['2','3'].includes(url.searchParams.get('v')) ? Number(url.searchParams.get('v')) : 1;
           player.terrainRevision = room.game.terrainRevision;
           player.blockedAt = 0;
           req.socket.setNoDelay(true);
           res.writeHead(200, {'Content-Type': 'text/event-stream; charset=utf-8',
             'Cache-Control': 'no-cache, no-transform', Connection: 'keep-alive',
             'X-Accel-Buffering': 'no', 'X-Content-Type-Options': 'nosniff'});
-          res.write('retry: 1500\n\n');
-          res.write(encode({...snapshot(room, player.protocol === 2), walls: room.game.walls}));
-          const heartbeat = setInterval(() => { if (!res.destroyed) res.write(': heartbeat\n\n'); }, 10000);
+          res.write(`retry: ${N.sseRetryMs}\n\n`);
+          res.write(encode({...snapshot(room, player.protocol >= 2), walls: room.game.walls}));
+          const heartbeat = setInterval(() => { if (!res.destroyed) res.write(': heartbeat\n\n'); }, N.heartbeatMs);
           heartbeat.unref();
           res.on('close', () => {
             clearInterval(heartbeat);
@@ -209,6 +229,7 @@ function createGameServer(options = {}) {
           removePlayer(room, player);
           return json(res, 204);
         }
+        if (body.round !== undefined && body.round !== room.game.round) return json(res, 204);
         const input = body.input;
         if (!input || typeof input !== 'object' || !Number.isFinite(input.x) ||
           !Number.isFinite(input.y) || !Number.isFinite(input.angle) || typeof input.shoot !== 'boolean') {
@@ -244,12 +265,13 @@ function createGameServer(options = {}) {
     }
   });
 
+  server.on('connection', socket => socket.setNoDelay(true));
   server.on('listening', () => {
     let previousTick = performance.now(), accumulator = 0;
     simulationTimer = setInterval(() => {
       const tickNow = performance.now();
-      accumulator += Math.min(.15, (tickNow - previousTick) / 1000); previousTick = tickNow;
-      const steps = Math.min(4, Math.floor(accumulator * 30)); accumulator -= steps / 30;
+      accumulator += Math.min(N.maxCatchupSeconds, (tickNow - previousTick) / 1000); previousTick = tickNow;
+      const steps = Math.min(N.maxCatchupSteps, Math.floor(accumulator * N.simulationHz)); accumulator -= steps / N.simulationHz;
       const now = Date.now();
       for (const [code, room] of rooms) {
         for (const player of room.players.values()) {
@@ -261,12 +283,19 @@ function createGameServer(options = {}) {
           }
         }
         if (room.players.size) {
-          for (let tick = 0; tick < steps; tick++) engine.step(room.game, 1 / 30);
+          for (let tick = 0; tick < steps; tick++) {
+            const round = room.game.round;
+            engine.step(room.game, 1 / N.simulationHz);
+            for (const player of room.players.values()) {
+              if (round !== room.game.round) player.input = {x:0,y:0,angle:-Math.PI/2,shoot:false};
+              player.appliedSeq = player.lastInputSeq;
+            }
+          }
           room.lastOccupiedAt = now;
         } else if (now - room.lastOccupiedAt > roomLifetimeMs) rooms.delete(code);
       }
-    }, 1000 / 30);
-    broadcastTimer = setInterval(() => { for (const room of rooms.values()) writeFrame(room); }, 50);
+    }, 1000 / N.simulationHz);
+    broadcastTimer = setInterval(() => { for (const room of rooms.values()) writeFrame(room); }, 1000 / N.broadcastHz);
     simulationTimer.unref();
     broadcastTimer.unref();
   });
@@ -278,13 +307,13 @@ function createGameServer(options = {}) {
     server.close(callback);
     server.closeAllConnections();
   };
-  server.requestTimeout = 10000;
-  server.headersTimeout = 10000;
+  server.requestTimeout = N.serverRequestTimeoutMs;
+  server.headersTimeout = N.serverRequestTimeoutMs;
   return server;
 }
 
 if (require.main === module) {
-  const port = Number(process.env.PORT) || 8002;
+  const port = Number(process.env.PORT) || C.port;
   const server = createGameServer();
   server.listen(port, '0.0.0.0', () => {
     console.log(`\n  TANK FIELD · 装甲前线\n  本机打开：http://localhost:${port}\n`);

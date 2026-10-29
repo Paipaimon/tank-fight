@@ -2,7 +2,7 @@
 (() => {
   'use strict';
   const $ = id => document.getElementById(id);
-  const engine = window.TankEngine;
+  const engine = window.TankEngine, C = window.TankConfig, N = C.network;
   if (!engine) { $('lobby-error').textContent = '未能加载战斗引擎，请确认 engine.js 与 HTML 在同一文件夹。'; return; }
   const canvas = $('battlefield'), ctx = canvas.getContext('2d');
   const serverBase = String(window.TANK_SERVER_URL || '').trim().replace(/\/+$/, '');
@@ -10,7 +10,8 @@
   const timeline = new window.TankNetwork.Timeline();
   let selectedVehicle = 'vanguard', terrainCanvas, foliageCanvas, terrainKey = '', hudSignature = '';
   let inputSequence = 0, requestsInFlight = 0, lastSentInput = '', lastSentAt = 0;
-  let previewVehicle = '';
+  let previewVehicle = '', pendingInput = false, foliageKey = '';
+  canvas.width = C.map.width; canvas.height = C.map.height;
   const palette = { repair: '#c0e58a', shield: '#8bc7e9', rapid: '#f0d274', spread: '#eaa186', speed: '#c1aaed' };
   const symbols = { repair: '+', shield: '⬡', rapid: 'ϟ', spread: '⋔', speed: '»' };
   const names = { repair: '战地维修', shield: '能量护盾', rapid: '极速连射', spread: '三重火力', speed: '涡轮加速' };
@@ -22,6 +23,17 @@
   let soundEnabled = false, audioContext, toastTimer, floorSeed, floorCanvas, lastWave = 1;
   let recentEvents = new Set(), animationClock = 0;
   let connectionLost = false, networkFailureAt = 0, connectionGeneration = 0, connecting = false;
+  let aimSource = 'mouse';
+  const touch = window.TankTouch.create({ move: $('move-stick'), aim: $('aim-stick'),
+    enabled: () => mode !== 'lobby' && !paused && !document.hidden && !$('guide-dialog').open,
+    onChange: () => { if (touch.read().aiming) aimSource = 'touch'; sendInput(true); }
+  });
+  function updateTouchLayout() {
+    document.body.classList.toggle('touch-ui', matchMedia('(pointer: coarse)').matches || innerWidth <= C.touch.breakpoint);
+    clearInput();
+  }
+  window.addEventListener('resize', updateTouchLayout);
+  matchMedia('(pointer: coarse)').addEventListener('change', updateTouchLayout);
 
   function seedRandom(seed) { let n = Number(seed) || 73489; return () => { n = Math.imul(1664525, n) + 1013904223 | 0; return (n >>> 0) / 4294967296; }; }
   function roundRect(c, x, y, w, h, r, fill, stroke) { c.beginPath(); c.roundRect(x, y, w, h, r); if (fill) { c.fillStyle = fill; c.fill(); } if (stroke) { c.strokeStyle = stroke; c.stroke(); } }
@@ -35,7 +47,7 @@
     const c = document.createElement('canvas'); c.width = s.width; c.height = s.height;
     const g = c.getContext('2d'), rand = seedRandom(s.mapSeed ?? s.seed);
     g.fillStyle = '#38422e'; g.fillRect(0, 0, c.width, c.height);
-    for (let i = 0; i < 50; i++) {
+    for (let i = 0; i < C.render.floorPatches; i++) {
       const x = rand() * c.width, y = rand() * c.height, r = 35 + rand() * 150;
       const grad = g.createRadialGradient(x,y,0,x,y,r); grad.addColorStop(0,i%2?'#4d503330':'#223b2d50'); grad.addColorStop(1,'#303d2b00');
       g.fillStyle = grad; g.fillRect(x-r,y-r,r*2,r*2);
@@ -43,7 +55,7 @@
     g.lineWidth = 1; g.strokeStyle = '#9aac6d0b';
     for (let x=0;x<c.width;x+=40) { g.beginPath();g.moveTo(x,0);g.lineTo(x,c.height);g.stroke(); }
     for (let y=0;y<c.height;y+=40) { g.beginPath();g.moveTo(0,y);g.lineTo(c.width,y);g.stroke(); }
-    for (let i=0;i<1300;i++) {
+    for (let i=0;i<C.render.floorGrain;i++) {
       const x=rand()*c.width,y=rand()*c.height,r=rand()*2;
       g.fillStyle=i%3?'#9da77916':'#121f1a2e';g.fillRect(x,y,r+1,r+.5);
     }
@@ -85,14 +97,18 @@
       c.strokeStyle='#5b5039';c.lineWidth=2;
       for(let r=12;r<height-2;r+=12){c.beginPath();c.moveTo(x+1,y+r);c.lineTo(x+width-1,y+r);c.stroke();}
       for(let row=0;row<height/12;row++){const dx=row%2?width*.65:width*.35;c.beginPath();c.moveTo(x+dx,y+row*12+1);c.lineTo(x+dx,y+Math.min(height-2,(row+1)*12));c.stroke();}
-      if(w.hp<60){c.strokeStyle='#453d2c';c.lineWidth=1;c.beginPath();c.moveTo(x+width*.5,y+2);c.lineTo(x+width*.35,y+height*.4);c.lineTo(x+width*.63,y+height*.7);c.lineTo(x+width*.4,y+height-2);c.stroke();}
+      if(w.hp<C.map.brickHp){c.strokeStyle='#453d2c';c.lineWidth=1;c.beginPath();c.moveTo(x+width*.5,y+2);c.lineTo(x+width*.35,y+height*.4);c.lineTo(x+width*.63,y+height*.7);c.lineTo(x+width*.4,y+height-2);c.stroke();}
     }
   }
 
   function drawTank(c,t,scale=1,preview=false) {
     const enemy=t.team==='enemy', color=t.color||(enemy?'#df9677':'#c4dc8b');
-    const kind = t.vehicle || 'vanguard';
-    c.save();c.translate(t.x,t.y);c.scale(scale,scale);
+    const kind = enemy ? (t.enemyType === 'boss' ? 'heavy' : t.enemyType === 'elite' ? 'striker' : 'vanguard') : t.vehicle || 'vanguard';
+    const size = t.enemyType === 'boss' ? 1.18 : 1;
+    c.save();c.translate(t.x,t.y);c.scale(scale * size,scale * size);
+    if (enemy && t.enemyType !== 'normal' && t.enemyType) {
+      c.strokeStyle=color+'99';c.lineWidth=1.5;c.setLineDash([4,4]);c.beginPath();c.arc(0,0,24,0,Math.PI*2);c.stroke();c.setLineDash([]);
+    }
     if(!preview && ((t.buffs?.shield||0)>(state?.time||0) || (t.invulnerableUntil||0)>(state?.time||0))) {
       c.beginPath();c.arc(0,0,28+Math.sin(animationClock*4)*1.4,0,Math.PI*2);c.fillStyle='#8bc7e911';c.fill();c.strokeStyle='#a2d5e78a';c.lineWidth=1.5;c.stroke();
     }
@@ -106,7 +122,7 @@
     roundRect(c,-17,-12,34,24,3,enemy?'#a8694c':'#829555','#212e24');
     roundRect(c,-13,-10,24,20,2,color);
     if(kind==='heavy') {roundRect(c,-17,-14,34,4,1,'#b5aa85');roundRect(c,-17,10,34,4,1,'#b5aa85');roundRect(c,12,-10,7,20,2,color,'#ead7a780');}
-    if(kind==='scout') {c.fillStyle='#1f373d';c.beginPath();c.moveTo(15,-9);c.lineTo(20,0);c.lineTo(15,9);c.fill();c.strokeStyle='#94e1ed';c.beginPath();c.moveTo(-11,-11);c.lineTo(-20,-22);c.stroke();}
+    if(kind==='scout') {c.fillStyle='#1f373d';c.beginPath();c.moveTo(15,-9);c.lineTo(20,0);c.lineTo(15,9);c.fill();}
     if(kind==='striker') {roundRect(c,-13,-13,8,5,1,'#a68ac3');roundRect(c,-13,8,8,5,1,'#a68ac3');}
     c.fillStyle=enemy?'#b67553':'#80964f';c.fillRect(-12,-8,6,16);
     c.strokeStyle='#24332255';c.lineWidth=1;for(let yy=-6;yy<=6;yy+=3){c.beginPath();c.moveTo(-11,yy);c.lineTo(-7,yy);c.stroke();}
@@ -124,9 +140,10 @@
     roundRect(c,-5,-5,8,10,3,enemy?'#ad7457':'#8b9f57');
     c.fillStyle='#eaf1c38a';c.fillRect(-3,-4,4,2);c.restore();
     if(!preview){
-      const hp=Math.max(0,t.hp/(t.maxHp||100));
+      const hp=Math.max(0,t.hp/(t.maxHp||C.vehicles.vanguard.hp));
       c.fillStyle='#101a1299';c.fillRect(-18,-29,36,3);c.fillStyle=enemy?'#e6a17c':'#cce898';c.fillRect(-18,-29,36*hp,3);
       if(t.team==='player'){c.font='9px "Microsoft YaHei",sans-serif';c.textAlign='center';c.fillStyle=t.id===localId?'#e5f3bf':'#b6dce0';c.fillText(t.id===localId?'你':t.name||'队友',0,-36);}
+      else if(t.enemyType==='boss'||t.enemyType==='elite'){c.font='bold 9px "Microsoft YaHei",sans-serif';c.textAlign='center';c.fillStyle=color;c.fillText(t.enemyType==='boss'?'BOSS · 铁幕':'精英 · 猎杀者',0,-36);}
     }
     c.restore();
   }
@@ -141,17 +158,22 @@
 
   function draw(s, dt) {
     if(!s)return;
-    if(floorSeed!==(s.mapSeed??s.seed)){floorSeed=s.mapSeed??s.seed;floorCanvas=buildFloor(s);}
+    if(floorSeed!==s.seed){floorSeed=s.seed;floorCanvas=buildFloor(s);}
     const key = `${s.mapSeed}:${s.terrainRevision}`;
     if(key!==terrainKey) {
       terrainKey=key;
-      terrainCanvas=document.createElement('canvas');terrainCanvas.width=1280;terrainCanvas.height=800;
-      foliageCanvas=document.createElement('canvas');foliageCanvas.width=1280;foliageCanvas.height=800;
-      const ground=terrainCanvas.getContext('2d'), foliage=foliageCanvas.getContext('2d');
-      ground.drawImage(floorCanvas,0,0);
-      for(const wall of s.walls||[]){drawWall(wall,false,ground);drawWall(wall,true,foliage);}
+      terrainCanvas ||= document.createElement('canvas');
+      foliageCanvas ||= document.createElement('canvas');
+      if(terrainCanvas.width!==C.map.width||terrainCanvas.height!==C.map.height){terrainCanvas.width=C.map.width;terrainCanvas.height=C.map.height;}
+      const ground=terrainCanvas.getContext('2d'); ground.drawImage(floorCanvas,0,0);
+      for(const wall of s.walls||[])drawWall(wall,false,ground);
+      const mapKey=s.seed+':'+s.mapSeed+':'+s.round;
+      if(foliageKey!==mapKey){
+        foliageKey=mapKey;foliageCanvas.width=C.map.width;foliageCanvas.height=C.map.height;
+        const foliage=foliageCanvas.getContext('2d');for(const wall of s.walls||[])drawWall(wall,true,foliage);
+      }
     }
-    ctx.clearRect(0,0,1280,800);ctx.drawImage(terrainCanvas,0,0);
+    ctx.clearRect(0,0,C.map.width,C.map.height);ctx.drawImage(terrainCanvas,0,0);
     for(const p of s.pickups||[])drawPickup(p);
     for(const t of s.tanks||[]) {
       if(t.alive===false||t.hp<=0)continue;
@@ -160,8 +182,8 @@
     for(const b of s.bullets||[]){ctx.save();ctx.strokeStyle=b.team==='player'?'#e9f2a0':'#f2ac7f';ctx.lineWidth=3;ctx.lineCap='round';ctx.shadowColor=ctx.strokeStyle;ctx.shadowBlur=8;ctx.beginPath();ctx.moveTo(b.x-b.vx*.013,b.y-b.vy*.013);ctx.lineTo(b.x,b.y);ctx.stroke();ctx.fillStyle='#fff5cc';ctx.beginPath();ctx.arc(b.x,b.y,2.3,0,Math.PI*2);ctx.fill();ctx.restore();}
     ctx.drawImage(foliageCanvas,0,0);
     for(const e of s.effects||[]){const ratio=Math.max(0,Math.min(1,e.life/(e.maxLife||.5)));ctx.save();ctx.globalAlpha=ratio;ctx.strokeStyle=e.color||'#f6c781';ctx.fillStyle=e.color||'#f6c781';const radius=(1-ratio)*(e.type==='explosion'?45:17)+3;ctx.beginPath();ctx.arc(e.x,e.y,radius,0,Math.PI*2);ctx.lineWidth=2;ctx.stroke();for(let j=0;j<8;j++){const a=j*Math.PI/4+e.x;ctx.fillRect(e.x+Math.cos(a)*radius*1.3,e.y+Math.sin(a)*radius*1.3,3,3);}ctx.restore();}
-    if(mode!=='lobby'&&mouse.inside&&!paused){ctx.save();ctx.translate(mouse.x,mouse.y);ctx.strokeStyle='#e4f1b7a8';ctx.lineWidth=1;ctx.beginPath();ctx.arc(0,0,9,0,Math.PI*2);ctx.moveTo(-15,0);ctx.lineTo(-5,0);ctx.moveTo(5,0);ctx.lineTo(15,0);ctx.moveTo(0,-15);ctx.lineTo(0,-5);ctx.moveTo(0,5);ctx.lineTo(0,15);ctx.stroke();ctx.fillStyle='#f0f5c8';ctx.fillRect(-1,-1,2,2);ctx.restore();}
-    const vignette=ctx.createRadialGradient(640,400,230,640,400,750);vignette.addColorStop(0,'#08160e00');vignette.addColorStop(1,'#0a140c50');ctx.fillStyle=vignette;ctx.fillRect(0,0,1280,800);
+    if(mode!=='lobby'&&aimSource==='mouse'&&mouse.inside&&!paused){ctx.save();ctx.translate(mouse.x,mouse.y);ctx.strokeStyle='#e4f1b7a8';ctx.lineWidth=1;ctx.beginPath();ctx.arc(0,0,9,0,Math.PI*2);ctx.moveTo(-15,0);ctx.lineTo(-5,0);ctx.moveTo(5,0);ctx.lineTo(15,0);ctx.moveTo(0,-15);ctx.lineTo(0,-5);ctx.moveTo(0,5);ctx.lineTo(0,15);ctx.stroke();ctx.fillStyle='#f0f5c8';ctx.fillRect(-1,-1,2,2);ctx.restore();}
+    const vignette=ctx.createRadialGradient(640,400,230,640,400,750);vignette.addColorStop(0,'#08160e00');vignette.addColorStop(1,'#0a140c50');ctx.fillStyle=vignette;ctx.fillRect(0,0,C.map.width,C.map.height);
   }
 
   function drawVehiclePreview(kind = selectedVehicle) {
@@ -179,7 +201,8 @@
     if(!state)return;
     processEvents();
     const me=state.tanks.find(t=>t.id===localId), human=state.tanks.filter(t=>t.team==='player');
-    const signature=JSON.stringify([mode,selectedVehicle,session?.roomCode,state.mapSeed,state.wave,state.phase,Math.ceil(state.nextWaveAt-state.time),Math.floor(state.time),me?.hp,me?.kills,me?.alive,Math.ceil((me?.respawnAt||0)-state.time),Object.entries(me?.buffs||{}).map(([k,v])=>[k,Math.max(0,Math.ceil(v-state.time))]),state.tanks.filter(t=>t.team==='enemy'&&t.alive).length,human.map(t=>[t.id,t.name,t.alive,t.vehicle])]);
+    const boss=state.tanks.find(t=>t.enemyType==='boss'&&t.alive);
+    const signature=JSON.stringify([mode,selectedVehicle,session?.roomCode,state.mapSeed,state.wave,state.phase,Math.ceil(state.nextWaveAt-state.time),Math.floor(state.time),me?.hp,me?.kills,me?.alive,boss?.hp,Math.ceil((me?.respawnAt||0)-state.time),Object.entries(me?.buffs||{}).map(([k,v])=>[k,Math.max(0,Math.ceil(v-state.time))]),state.tanks.filter(t=>t.team==='enemy'&&t.alive).length,human.map(t=>[t.id,t.name,t.alive,t.vehicle])]);
     if(signature===hudSignature)return;hudSignature=signature;
     const spec=engine.vehicle(me?.vehicle||selectedVehicle);if(previewVehicle!==spec.id)drawVehiclePreview(spec.id);
     $('map-name').textContent=state.mapName||'荒原前哨';$('wave-value').textContent=String(state.wave).padStart(2,'0');
@@ -188,11 +211,16 @@
     $('mode-label').textContent=mode==='online'?'合作作战':mode==='solo'?'单人演练':'训练模式';
     $('kills-value').textContent=String(me?.kills||0).padStart(2,'0');
     const time=Math.floor(state.time||0);$('time-value').textContent=String(Math.floor(time/60)).padStart(2,'0')+':'+String(time%60).padStart(2,'0');
-    const hp=Math.max(0,Math.ceil(me?.hp??100)),max=me?.maxHp||100;
+    const hp=Math.max(0,Math.ceil(me?.hp??engine.vehicle(selectedVehicle).hp)),max=me?.maxHp||engine.vehicle(selectedVehicle).hp;
     $('health-value').replaceChildren(document.createTextNode(hp+' '),textNode('small','/ '+max));
     $('health-bar').style.width=(hp/max*100)+'%';$('health-bar').style.background=hp<30?'#ed9d7c':'var(--lime)';
     $('player-label').textContent=mode==='lobby'?spec.name:me?.name||spec.name;
     const buffs=Object.entries(me?.buffs||{}).filter(([type,expiry])=>names[type]&&expiry>state.time);
+    $('combat-hud').classList.toggle('hidden',mode==='lobby');
+    $('combat-health').textContent='装甲 '+hp+'/'+max+' · '+human.filter(t=>t.alive).length+'/'+human.length+' 存活';
+    $('combat-buffs').textContent=buffs.map(([type,expiry])=>symbols[type]+' '+Math.ceil(expiry-state.time)+'s').join('  ');
+    $('boss-health').classList.toggle('hidden',!boss||mode==='lobby');
+    if(boss){$('boss-title').textContent=boss.name+' · '+Math.ceil(boss.hp)+' / '+boss.maxHp;$('boss-bar').style.width=boss.hp/boss.maxHp*100+'%';}
     const list=$('buffs-list');list.replaceChildren();
     if(!buffs.length){const empty=textNode('div','','empty-buff');empty.append(textNode('span','＋'));const label=textNode('div','等待补给');label.append(textNode('small','驶过道具即可自动拾取'));empty.append(label);list.append(empty);}
     for(const [type,expiry] of buffs){const row=textNode('div','','buff-row');row.append(textNode('span',symbols[type],'supply-icon '+type),textNode('span',names[type]),textNode('time',Math.ceil(expiry-state.time)+'s'));list.append(row);}
@@ -211,71 +239,92 @@
   }
   function playSound(type){if(!soundEnabled)return;try{audioContext??=new(window.AudioContext||window.webkitAudioContext)();if(audioContext.state==='suspended')audioContext.resume();const osc=audioContext.createOscillator(),gain=audioContext.createGain(),now=audioContext.currentTime;osc.type=type==='pickup'?'sine':'triangle';osc.frequency.setValueAtTime(type==='pickup'?720:type==='kill'?90:170,now);osc.frequency.exponentialRampToValueAtTime(type==='pickup'?1100:35,now+.12);gain.gain.setValueAtTime(type==='shot'?.025:.05,now);gain.gain.exponentialRampToValueAtTime(.001,now+.16);osc.connect(gain);gain.connect(audioContext.destination);osc.start();osc.stop(now+.17);}catch{soundEnabled=false;}}
   function toast(message){$('toast').textContent=message;$('toast').classList.remove('hidden');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').classList.add('hidden'),3000);}
-  function input(){const me=(mode==='online'&&timeline.local)||state?.tanks.find(t=>t.id===localId);return{x:(keys.has('KeyD')||keys.has('ArrowRight')?1:0)-(keys.has('KeyA')||keys.has('ArrowLeft')?1:0),y:(keys.has('KeyS')||keys.has('ArrowDown')?1:0)-(keys.has('KeyW')||keys.has('ArrowUp')?1:0),angle:me?Math.atan2(mouse.y-me.y,mouse.x-me.x):0,shoot:firing||keys.has('Space')};}
-  function clearInput(){keys.clear();firing=false;if(session)sendInput(true);}
+  function input(){const me=(mode==='online'&&timeline.local)||state?.tanks.find(t=>t.id===localId),pad=touch.read();return{x:pad.x+(keys.has('KeyD')||keys.has('ArrowRight')?1:0)-(keys.has('KeyA')||keys.has('ArrowLeft')?1:0),y:pad.y+(keys.has('KeyS')||keys.has('ArrowDown')?1:0)-(keys.has('KeyW')||keys.has('ArrowUp')?1:0),angle:aimSource==='touch'?pad.angle:me?Math.atan2(mouse.y-me.y,mouse.x-me.x):0,shoot:pad.shoot||firing||keys.has('Space')};}
+  function clearInput(){keys.clear();firing=false;touch.reset();}
   function connectionControls(disabled){for(const id of ['host-button','join-button','show-join-button','vehicle-select'])$(id).disabled=disabled;}
   function leaveSession(old){fetch(serverURL(`/api/rooms/${old.roomCode}/leave`),{method:'POST',credentials:'omit',headers:{'Content-Type':'application/json'},body:JSON.stringify({playerId:old.playerId,token:old.token}),keepalive:true}).catch(()=>{});}
-  function clearNetwork(){timeline.reset();inputSequence=0;requestsInFlight=0;lastSentInput='';lastSentAt=0;connectionGeneration++;connecting=false;connectionControls(false);if(stream){stream.close();stream=null;}if(session){const old=session;session=null;leaveSession(old);}connectionLost=false;networkFailureAt=0;}
-  function enterBattle(){clearInput();hudSignature='';paused=false;recentEvents.clear();$('lobby').classList.add('hidden');$('pause-overlay').classList.add('hidden');$('lobby-error').textContent='';canvas.focus();}
-  function startSolo(){clearNetwork();localId='commander';game=engine.createGame({seed:Math.floor(Math.random()*9999999)});engine.addPlayer(game,{id:localId,name:'指挥官',color:engine.vehicle(selectedVehicle).color,vehicle:selectedVehicle});state=engine.snapshot(game);mode='solo';lastWave=1;floorSeed=null;enterBattle();$('connection-label').textContent='单人演练进行中';$('connection-sub').textContent='SOLO OPERATION / ACTIVE';toast('部署完成 · WASD 移动，按住左键开火');updateHUD();}
-  function returnLobby(){clearNetwork();mode='lobby';paused=false;clearInput();localId='commander';$('lobby').classList.remove('hidden');$('pause-overlay').classList.add('hidden');$('connection-label').textContent='本地引擎就绪';$('connection-sub').textContent='准备部署 / READY';resetPreview();updateHUD();}
-  function togglePause(force){if(mode==='lobby')return;paused=typeof force==='boolean'?force:!paused;clearInput();$('pause-overlay').classList.toggle('hidden',!paused);$('pause-description').textContent=mode==='online'?'联机战斗仍在继续，队友正在等待你的支援。':'深呼吸，下一发命中目标。';if(!paused)canvas.focus();}
+  function clearNetwork(){timeline.reset();inputSequence=0;requestsInFlight=0;lastSentInput='';lastSentAt=0;pendingInput=false;connectionGeneration++;connecting=false;connectionControls(false);if(stream){stream.close();stream=null;}if(session){const old=session;session=null;leaveSession(old);}connectionLost=false;networkFailureAt=0;}
+  function enterTouchFullscreen(){
+    if(document.body.classList.contains('touch-ui')&&matchMedia('(orientation: landscape)').matches&&!document.fullscreenElement){
+      const panel=document.querySelector('.arena-panel');
+      if(panel.requestFullscreen)panel.requestFullscreen().catch(()=>{});
+    }
+  }
+  function enterBattle(){clearInput();hudSignature='';paused=false;document.body.classList.remove('battle-paused');document.body.classList.add('in-battle');recentEvents.clear();$('lobby').classList.add('hidden');$('pause-overlay').classList.add('hidden');$('lobby-error').textContent='';canvas.focus({preventScroll:true});}
+  function startSolo(){enterTouchFullscreen();clearNetwork();localId='commander';game=engine.createGame({seed:Math.floor(Math.random()*9999999)});engine.addPlayer(game,{id:localId,name:'指挥官',color:engine.vehicle(selectedVehicle).color,vehicle:selectedVehicle});state=engine.snapshot(game);mode='solo';lastWave=1;floorSeed=null;enterBattle();$('connection-label').textContent='单人演练进行中';$('connection-sub').textContent='SOLO OPERATION / ACTIVE';toast('部署完成 · WASD 移动，按住左键开火');updateHUD();}
+  function returnLobby(){if(document.fullscreenElement)document.exitFullscreen().catch(()=>{});clearNetwork();mode='lobby';paused=false;document.body.classList.remove('in-battle','battle-paused');clearInput();localId='commander';$('lobby').classList.remove('hidden');$('pause-overlay').classList.add('hidden');$('connection-label').textContent='本地引擎就绪';$('connection-sub').textContent='准备部署 / READY';resetPreview();updateHUD();}
+  function togglePause(force){if(mode==='lobby')return;paused=typeof force==='boolean'?force:!paused;document.body.classList.toggle('battle-paused',paused);clearInput();$('pause-overlay').classList.toggle('hidden',!paused);$('pause-description').textContent=mode==='online'?'联机战斗仍在继续，队友正在等待你的支援。':'深呼吸，下一发命中目标。';if(!paused)canvas.focus({preventScroll:true});}
   function selectTab(multi){if(!multi&&mode==='lobby')clearNetwork();$('solo-tab').classList.toggle('selected',!multi);$('multi-tab').classList.toggle('selected',multi);$('solo-tab').setAttribute('aria-selected',String(!multi));$('multi-tab').setAttribute('aria-selected',String(multi));$('solo-form').classList.toggle('hidden',multi);$('multi-form').classList.toggle('hidden',!multi);$('lobby-error').textContent='';}
-  async function api(path,body){const response=await fetch(serverURL(path),{method:'POST',credentials:'omit',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(8000)});const data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(data.error||'连接失败，请检查服务是否已启动。');return data;}
+  async function api(path,body){const response=await fetch(serverURL(path),{method:'POST',credentials:'omit',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(N.connectTimeoutMs)});const data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(data.error||'连接失败，请检查服务是否已启动。');return data;}
   async function connectRoom(join){
     if(connecting)return;
+    enterTouchFullscreen();
     if(location.protocol==='file:'&&!serverBase){$('lobby-error').textContent='多人模式需要联机服务：运行 npm start 后打开终端显示的地址，或在 config.js 中填写服务器地址。';return;}
     const code=$('room-code').value.trim().toUpperCase();if(join&&!/^[A-Z0-9]{4,8}$/.test(code)){$('lobby-error').textContent='请输入有效的房间代码。';return;}
     clearNetwork();const generation=connectionGeneration;connecting=true;connectionControls(true);$('lobby-error').textContent='正在连接战场…';
-    try{const credentials=await api(join?`/api/rooms/${code}/join`:'/api/rooms',{name:$('player-name').value.trim()||'指挥官',vehicle:selectedVehicle});if(generation!==connectionGeneration){leaveSession(credentials);return;}session=credentials;localId=session.playerId;const active=session;networkFailureAt=performance.now();stream=new EventSource(serverURL(`/api/rooms/${session.roomCode}/events?v=2&playerId=${encodeURIComponent(session.playerId)}&token=${encodeURIComponent(session.token)}`));let opened=false;
-      stream.onmessage=event=>{if(session!==active)return;try{const data=JSON.parse(event.data);if(!Array.isArray(data.tanks))return;if(!timeline.receive(data,performance.now(),localId))return;state=timeline.state;processEvents();connectionLost=false;networkFailureAt=0;if(!opened){opened=true;connecting=false;connectionControls(false);mode='online';floorSeed=null;lastWave=state.wave;enterBattle();toast('已进入房间 '+session.roomCode+' · 邀请朋友加入');}const me=state.tanks.find(t=>t.id===localId);if(!me){returnLobby();$('lobby-error').textContent='连接已过期，请重新加入房间。';return;}$('connection-label').textContent='小队通讯正常';$('connection-sub').textContent='ROOM '+session.roomCode+' / '+Math.round(timeline.rtt)+' ms';}catch{}};
+    try{const credentials=await api(join?`/api/rooms/${code}/join`:'/api/rooms',{name:$('player-name').value.trim()||'指挥官',vehicle:selectedVehicle});if(generation!==connectionGeneration){leaveSession(credentials);return;}session=credentials;localId=session.playerId;const active=session;networkFailureAt=performance.now();stream=new EventSource(serverURL(`/api/rooms/${session.roomCode}/events?v=3&playerId=${encodeURIComponent(session.playerId)}&token=${encodeURIComponent(session.token)}`));let opened=false;
+      stream.onmessage=event=>{if(session!==active)return;try{const data=JSON.parse(event.data);if(!Array.isArray(data.tanks))return;if(!timeline.receive(data,performance.now(),localId))return;state=timeline.state;if(timeline.roundChanged&&opened)clearInput();processEvents();connectionLost=false;networkFailureAt=0;if(!opened){opened=true;connecting=false;connectionControls(false);mode='online';floorSeed=null;lastWave=state.wave;enterBattle();toast('已进入房间 '+session.roomCode+' · 邀请朋友加入');}const me=state.tanks.find(t=>t.id===localId);if(!me){returnLobby();$('lobby-error').textContent='连接已过期，请重新加入房间。';return;}$('connection-label').textContent='小队通讯正常';$('connection-sub').textContent='ROOM '+session.roomCode+' / '+Math.round(timeline.rtt)+' ms';}catch{}};
       stream.onerror=()=>{if(session!==active)return;connectionLost=true;networkFailureAt||=performance.now();clearInput();$('connection-label').textContent='连接中断，正在重连';$('connection-sub').textContent='RECONNECTING…';if(!opened)$('lobby-error').textContent='正在连接房间，请稍候…';};
     }catch(error){if(generation===connectionGeneration){clearNetwork();$('lobby-error').textContent=error.message==='Failed to fetch'?'无法连接游戏服务器，请检查服务器地址和网络连接。':error.message;}}
   }
   async function sendInput(force=false) {
-    if(!session||requestsInFlight>=2||connectionLost||connecting)return;
-    const current=session, generation=connectionGeneration, now=performance.now();
+    if(!session||connectionLost||connecting)return;
+    const current=session,generation=connectionGeneration,now=performance.now();
     const controls=paused||document.hidden||$('guide-dialog').open?{x:0,y:0,angle:input().angle,shoot:false}:input();
-    controls.angle=Math.round(controls.angle*1000)/1000;
+    const length=Math.max(1,Math.hypot(controls.x,controls.y));controls.x/=length;controls.y/=length;
+    controls.angle=Math.round(controls.angle*N.precision)/N.precision;
     const encoded=JSON.stringify(controls);
-    if(!force&&encoded===lastSentInput&&now-lastSentAt<150)return;
-    lastSentInput=encoded;lastSentAt=now;requestsInFlight++;
+    if(encoded===lastSentInput&&now-lastSentAt<N.keepaliveMs)return;
+    // Keep only the newest input. Reserve one extra request for a release/stop.
+    const previous=lastSentInput?JSON.parse(lastSentInput):null;
+    const stopping=previous&&((!controls.x&&!controls.y&&(previous.x||previous.y))||(!controls.shoot&&previous.shoot));
+    if(requestsInFlight>=N.maxInFlight+(stopping?1:0)||(!stopping&&now-lastSentAt<1000/N.inputHz)){
+      pendingInput=true;return;
+    }
+    pendingInput=false;lastSentInput=encoded;lastSentAt=now;requestsInFlight++;
+    const seq=++inputSequence;timeline.sentInput(seq,controls);
     try {
-      const response=await fetch(serverURL('/api/rooms/'+current.roomCode+'/input'),{method:'POST',credentials:'omit',headers:{'Content-Type':'application/json'},body:JSON.stringify({playerId:current.playerId,token:current.token,seq:++inputSequence,input:controls}),signal:AbortSignal.timeout(1500)});
+      const response=await fetch(serverURL('/api/rooms/'+current.roomCode+'/input'),{method:'POST',credentials:'omit',headers:{'Content-Type':'application/json'},body:JSON.stringify({playerId:current.playerId,token:current.token,seq,round:state.round,input:controls}),signal:AbortSignal.timeout(N.requestTimeoutMs)});
       if(session!==current)return;
       timeline.recordRTT(performance.now()-now);
       if(!response.ok){returnLobby();$('lobby-error').textContent='房间连接已失效，请重新加入。';}
-    } catch {if(session===current)lastSentInput='';}
-    finally {if(generation===connectionGeneration)requestsInFlight=Math.max(0,requestsInFlight-1);}
+    }catch{if(session===current){lastSentInput='';pendingInput=true;}}
+    finally{if(generation===connectionGeneration){requestsInFlight=Math.max(0,requestsInFlight-1);if(pendingInput)sendInput();}}
   }
-  function updatePointer(event){const r=canvas.getBoundingClientRect(),scale=Math.min(r.width/1280,r.height/800),width=1280*scale,height=800*scale;mouse.x=(event.clientX-r.left-(r.width-width)/2)/scale;mouse.y=(event.clientY-r.top-(r.height-height)/2)/scale;mouse.inside=mouse.x>=0&&mouse.y>=0&&mouse.x<=1280&&mouse.y<=800;}
-  canvas.addEventListener('pointermove',updatePointer);canvas.addEventListener('pointerdown',event=>{if(event.button!==0||mode==='lobby'||paused)return;updatePointer(event);firing=true;sendInput(true);canvas.setPointerCapture(event.pointerId);canvas.focus();event.preventDefault();});
-  window.addEventListener('pointerup',()=>{if(firing){firing=false;sendInput(true);}});canvas.addEventListener('pointercancel',()=>firing=false);canvas.addEventListener('pointerleave',()=>mouse.inside=false);canvas.addEventListener('contextmenu',event=>event.preventDefault());
+  function updatePointer(event){if(event.pointerType==='touch')return;aimSource='mouse';const r=canvas.getBoundingClientRect(),scale=Math.min(r.width/C.map.width,r.height/C.map.height),width=C.map.width*scale,height=C.map.height*scale;mouse.x=(event.clientX-r.left-(r.width-width)/2)/scale;mouse.y=(event.clientY-r.top-(r.height-height)/2)/scale;mouse.inside=mouse.x>=0&&mouse.y>=0&&mouse.x<=C.map.width&&mouse.y<=C.map.height;}
+  canvas.addEventListener('pointermove',updatePointer);canvas.addEventListener('pointerdown',event=>{if(event.pointerType==='touch'||event.button!==0||mode==='lobby'||paused)return;updatePointer(event);firing=true;sendInput(true);canvas.setPointerCapture(event.pointerId);canvas.focus({preventScroll:true});event.preventDefault();});
+  window.addEventListener('pointerup',()=>{if(firing){firing=false;sendInput(true);}});canvas.addEventListener('pointercancel',()=>{firing=false;sendInput(true);});canvas.addEventListener('pointerleave',()=>mouse.inside=false);canvas.addEventListener('contextmenu',event=>event.preventDefault());
   window.addEventListener('keydown',event=>{if(['INPUT','TEXTAREA'].includes(event.target.tagName)||$('guide-dialog').open)return;if(['Escape','KeyP'].includes(event.code)&&!event.repeat){togglePause();return;}if(mode!=='lobby'&&['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(event.code)){event.preventDefault();if(!paused&&!keys.has(event.code)){keys.add(event.code);sendInput(true);}}});
   window.addEventListener('keyup',event=>{if(keys.delete(event.code))sendInput(true);});window.addEventListener('blur',()=>{clearInput();if(mode==='solo')togglePause(true);});document.addEventListener('visibilitychange',()=>{if(document.hidden){clearInput();if(mode==='solo')togglePause(true);}});
   window.addEventListener('pagehide',clearNetwork);
   $('start-button').addEventListener('click',startSolo);$('solo-tab').addEventListener('click',()=>selectTab(false));$('multi-tab').addEventListener('click',()=>selectTab(true));$('host-button').addEventListener('click',()=>connectRoom(false));$('join-button').addEventListener('click',()=>connectRoom(true));$('show-join-button').addEventListener('click',()=>{$('join-form').classList.toggle('hidden');$('room-code').focus();});$('room-code').addEventListener('keydown',e=>{if(e.key==='Enter')connectRoom(true);});
   $('pause-button').addEventListener('click',()=>togglePause());$('resume-button').addEventListener('click',()=>togglePause(false));$('exit-button').addEventListener('click',returnLobby);$('lobby-nav').addEventListener('click',()=>{if(mode!=='lobby')togglePause(true);else $('start-button').focus();});
+  $('touch-menu').addEventListener('click',()=>togglePause());
   $('room-button').addEventListener('click',async()=>{if(session){try{await navigator.clipboard.writeText(session.roomCode);toast('房间代码 '+session.roomCode+' 已复制');}catch{toast('房间代码：'+session.roomCode);}}else{if(mode!=='lobby')returnLobby();selectTab(true);$('player-name').focus();}});
   $('guide-button').addEventListener('click',()=>{clearInput();if(mode==='solo')togglePause(true);$('guide-dialog').showModal();});$('close-guide').addEventListener('click',()=>$('guide-dialog').close());$('guide-ready').addEventListener('click',()=>$('guide-dialog').close());$('guide-dialog').addEventListener('click',e=>{if(e.target===$('guide-dialog')){const r=e.target.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)e.target.close();}});
   $('sound-button').addEventListener('click',()=>{soundEnabled=!soundEnabled;$('sound-button').replaceChildren(document.createTextNode('♪'));if(!soundEnabled)$('sound-button').append(textNode('span','╱','slash'));$('sound-button').title=soundEnabled?'关闭音效':'开启音效';$('sound-button').setAttribute('aria-label',$('sound-button').title);playSound('pickup');toast(soundEnabled?'音效已开启':'音效已关闭');});
   $('fullscreen-button').addEventListener('click',async()=>{try{if(document.fullscreenElement)await document.exitFullscreen();else await $('canvas-wrap').requestFullscreen();}catch{toast('当前浏览器不支持全屏，可以按 F11 放大战场。');}});
 
   function frame(now) {
-    const dt=Math.min(.05,(now-lastFrame)/1000);lastFrame=now;animationClock+=dt;
-    if(mode==='solo'&&!paused){engine.setInput(game,localId,input());engine.step(game,dt);state=game;}
-    if(session&&now-lastNetworkInput>33){lastNetworkInput=now;sendInput();}
-    if(networkFailureAt&&now-networkFailureAt>15000){returnLobby();$('lobby-error').textContent='重连超时，请检查网络后重新加入房间。';}
+    const dt=Math.min(C.render.maxFrameDelta,(now-lastFrame)/1000);lastFrame=now;animationClock+=dt;
+    if(mode==='solo'&&!paused){const round=game.round;engine.setInput(game,localId,input());engine.step(game,dt);state=game;if(game.round!==round)clearInput();}
+    if(session&&now-lastNetworkInput>1000/N.inputHz){lastNetworkInput=now;sendInput();}
+    if(networkFailureAt&&now-networkFailureAt>N.reconnectTimeoutMs){returnLobby();$('lobby-error').textContent='重连超时，请检查网络后重新加入房间。';}
     const controls=input();if(paused||document.hidden||$('guide-dialog').open){controls.x=controls.y=0;controls.shoot=false;}
     const rendered=mode==='online'?timeline.render(now,dt,localId,connectionLost?null:controls):state;
     if(!document.hidden)draw(rendered||state,dt);
-    hudTime+=dt;if(hudTime>.1){hudTime=0;updateHUD();}requestAnimationFrame(frame);
+    hudTime+=dt;if(hudTime>C.render.hudInterval){hudTime=0;updateHUD();}requestAnimationFrame(frame);
   }
   for(const spec of Object.values(engine.VEHICLES)){
     const option=document.createElement('option');option.value=spec.id;option.textContent=spec.name+' · '+spec.label;$('vehicle-select').append(option);
   }
   function describeVehicle(){const spec=engine.vehicle(selectedVehicle);$('vehicle-details').textContent='装甲 '+spec.hp+' / 速度 '+spec.speed+' / '+(spec.barrels===3?'三联散射':'单发伤害 '+spec.damage);$('vehicle-description').textContent=spec.description;}
   $('vehicle-select').addEventListener('change',()=>{selectedVehicle=engine.vehicle($('vehicle-select').value).id;describeVehicle();resetPreview();drawVehiclePreview();hudSignature='';updateHUD();});
-  describeVehicle();
+  const supplyText=document.querySelectorAll('.supply-item div>span');
+  supplyText.forEach((element,index)=>element.textContent=index===0?'恢复 '+C.supplies.repair+' 点装甲': ['','抵御伤害','提升射速','散射火力','移动加速'][index]+' · '+C.supplies.duration+' 秒');
+  $('player-name').maxLength=C.nameLength;
+  $('guide-supplies').textContent='每关开局 '+C.supplies.initialCount+' 个道具，之后每 '+C.supplies.interval+' 秒刷新；增益持续 '+C.supplies.duration+' 秒，维修恢复 '+C.supplies.repair+' 点装甲。全队阵亡后 '+C.waves.retryDelay+' 秒重开本关。';
+  $('guide-enemies').textContent='每 '+C.waves.eliteEvery+' 关出现精英，每 '+C.waves.bossEvery+' 关出现 Boss。普通怪 / 精英 / Boss 掉落率：'+[C.enemies.normal,C.enemies.elite,C.enemies.boss].map(e=>Math.round(e.dropChance*100)+'%').join(' / ')+'。';
+  describeVehicle();updateTouchLayout();
   resetPreview();drawVehiclePreview();updateHUD();requestAnimationFrame(frame);
 })();

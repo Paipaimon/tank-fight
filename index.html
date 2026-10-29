@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="theme-color" content="#121a1c">
   <title>装甲前线 · TANK FIELD</title>
   <link rel="stylesheet" href="style.css">
@@ -11,7 +11,7 @@
   <header class="site-header">
     <a class="brand" href="./" aria-label="装甲前线首页"><svg viewBox="0 0 40 36" aria-hidden="true"><path d="M5 12h26v17H5zM11 8h13v17H11zM19 4h5v15h-5zM2 10h5v22H2zM30 10h5v22h-5z" fill="currentColor"/><path d="M13 15h12v9H13z" fill="#121a1c"/></svg><strong>TANK<span>FIELD</span></strong><i></i><span class="brand-cn">装甲前线</span></a>
     <nav aria-label="主导航"><button class="nav-link active" id="lobby-nav">作战大厅</button><button class="nav-link" id="guide-button">操作指南 <span>↗</span></button></nav>
-    <div class="header-actions"><span class="version">FIELD BUILD / 02</span><button class="icon-button" id="sound-button" title="开启音效" aria-label="开启音效">♪<span class="slash">╱</span></button><button class="icon-button" id="fullscreen-button" title="全屏" aria-label="全屏">⛶</button></div>
+    <div class="header-actions"><span class="version">FIELD BUILD / 04</span><button class="icon-button" id="sound-button" title="开启音效" aria-label="开启音效">♪<span class="slash">╱</span></button><button class="icon-button" id="fullscreen-button" title="全屏" aria-label="全屏">⛶</button></div>
   </header>
   <main>
     <section class="intro"><div><div class="eyebrow"><span class="little-line"></span> MULTIPLAYER TANK ARENA</div><h1>战场随时重构<span>，</span>战斗永不结束<span>。</span></h1></div><div class="connection"><span class="status-dot"></span><span id="connection-label">本地引擎就绪</span><span class="connection-sub" id="connection-sub">准备部署 / READY</span></div></section>
@@ -20,6 +20,13 @@
         <div class="arena-toolbar"><div class="map-label"><span class="status-dot"></span><span id="map-name">荒原前哨</span><span class="map-tag" id="mode-label">训练模式</span></div><div class="arena-meta"><span>关卡 <b id="wave-value">01</b></span><span>敌军 <b id="enemy-value">—</b></span><button id="pause-button" class="small-button" title="暂停 / Esc" aria-label="暂停">Ⅱ</button></div></div>
         <div class="canvas-wrap" id="canvas-wrap">
           <canvas id="battlefield" width="1280" height="800" tabindex="0" aria-label="坦克大战：WASD 移动，鼠标瞄准，按住左键射击"></canvas>
+          <div class="combat-hud hidden" id="combat-hud"><span id="combat-health"></span><span id="combat-buffs"></span><button id="touch-menu" aria-label="打开战斗菜单">Ⅱ 菜单</button></div>
+          <div class="boss-health hidden" id="boss-health"><span id="boss-title"></span><div><i id="boss-bar"></i></div></div>
+          <div class="touch-controls" id="touch-controls" aria-label="触屏双摇杆">
+            <div class="stick-group"><div class="touch-stick move-stick" id="move-stick" role="group" aria-label="移动摇杆，向需要移动的方向拖动"><span class="stick-cross">＋</span><i class="stick-knob"></i></div><span>移动</span></div>
+            <span class="touch-hint">双指操控<br>右摇杆拖动开火</span>
+            <div class="stick-group"><div class="touch-stick aim-stick" id="aim-stick" role="group" aria-label="瞄准射击摇杆，拖动瞄准并持续开火"><span class="stick-cross">⊕</span><i class="stick-knob"></i></div><span>瞄准 / 开火</span></div>
+          </div>
           <div class="field-top-label"><span>LIVE BATTLEFIELD</span><span id="seed-label">SECTOR 01 / 1280 × 800</span></div>
           <div id="wave-banner" class="wave-banner hidden"></div>
           <div id="respawn-banner" class="respawn-banner hidden"></div>
@@ -41,8 +48,8 @@
     <section class="supply-section"><div class="supply-heading"><h2>战场补给</h2><span>拾取即生效，扭转战局。</span></div><div class="supply-grid"><div class="supply-item"><span class="supply-icon repair">＋</span><div><strong>战地维修</strong><span>恢复 40 点装甲</span></div><span class="supply-index">01</span></div><div class="supply-item"><span class="supply-icon shield">⬡</span><div><strong>能量护盾</strong><span>抵御伤害 · 5 秒</span></div><span class="supply-index">02</span></div><div class="supply-item"><span class="supply-icon rapid">ϟ</span><div><strong>极速连射</strong><span>提升射速 · 5 秒</span></div><span class="supply-index">03</span></div><div class="supply-item"><span class="supply-icon spread">⋔</span><div><strong>三重火力</strong><span>散射火力 · 5 秒</span></div><span class="supply-index">04</span></div><div class="supply-item"><span class="supply-icon speed">»</span><div><strong>涡轮加速</strong><span>移动加速 · 5 秒</span></div><span class="supply-index">05</span></div></div></section>
     <footer><span><i></i> 每一次出发，都是全新的战场。</span><span>BUILT FOR THE NEXT ROUND <span>↗</span></span></footer>
   </main>
-  <dialog id="guide-dialog"><button class="dialog-close icon-button" id="close-guide" aria-label="关闭指南">×</button><div class="eyebrow">FIELD MANUAL / 01</div><h2>指挥官，欢迎入队。</h2><p>清除所有敌军后，战场会重新生成。关卡无限循环，敌人逐渐增强。</p><dl><dt>W A S D / 方向键</dt><dd>移动战车，可斜向移动。</dd><dt>鼠标移动 + 按住左键</dt><dd>独立旋转炮塔，持续射击。空格也可开火。</dd><dt>Esc / P</dt><dd>单人暂停；联机打开菜单，战斗继续。</dd><dt>四款战车</dt><dd>部署前选择先锋、游隼、堡垒或雷鸣。不同战车拥有不同装甲、速度与火力，单人和多人模式均可使用。</dd><dt>战场补给</dt><dd>驶过自动拾取；护盾、连射、散射、加速均持续 5 秒。阵亡后等待队友清场，或全队阵亡 3 秒后重开本关。</dd><dt>多人合作</dt><dd>朋友访问相同游戏服务器地址，再输入房间代码。支持局域网或服务器联机，最多 4 人共同闯关，队友之间没有友伤。</dd></dl><button id="guide-ready" class="primary-button">收到，准备作战 <span>→</span></button></dialog>
+  <dialog id="guide-dialog"><button class="dialog-close icon-button" id="close-guide" aria-label="关闭指南">×</button><div class="eyebrow">FIELD MANUAL / 01</div><h2>指挥官，欢迎入队。</h2><p>清除所有敌军后，战场会重新生成。关卡无限循环，敌人逐渐增强。</p><dl><dt>W A S D / 方向键</dt><dd>移动战车，可斜向移动。</dd><dt>鼠标移动 + 按住左键</dt><dd>独立旋转炮塔，持续射击。空格也可开火。</dd><dt>Esc / P</dt><dd>单人暂停；联机打开菜单，战斗继续。</dd><dt>四款战车</dt><dd>部署前选择先锋、游隼、堡垒或雷鸣。不同战车拥有不同装甲、速度与火力，单人和多人模式均可使用。</dd><dt>触屏操作</dt><dd>左侧摇杆移动，右侧摇杆拖动瞄准并持续开火；横屏时战场铺满视口，可用菜单暂停或返回大厅。</dd><dt>战场补给</dt><dd id="guide-supplies"></dd><dt>精英与 Boss</dt><dd id="guide-enemies"></dd><dt>多人合作</dt><dd>朋友访问相同游戏服务器地址，再输入房间代码。支持局域网或服务器联机，最多 4 人共同闯关，队友之间没有友伤。</dd></dl><button id="guide-ready" class="primary-button">收到，准备作战 <span>→</span></button></dialog>
   <div id="toast" class="toast hidden" role="status"></div>
-  <script src="config.js"></script><script src="engine.js"></script><script src="network.js"></script><script src="game.js"></script>
+  <script src="config.js"></script><script src="engine.js"></script><script src="network.js"></script><script src="touch.js"></script><script src="game.js"></script>
 </body>
 </html>

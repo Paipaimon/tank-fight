@@ -8,3 +8,65 @@
 .tactical-note p{white-space:pre-line}
 @media(max-width:520px){.supply-grid{grid-template-columns:repeat(2,1fr)}.intro h1{font-size:18px}.lobby-card{padding:21px}.controls-strip{gap:10px}.map-tag{display:none}}
 
+/* Touch combat keeps the map and both thumbs in the same viewport. */
+.touch-controls{display:none}
+.combat-hud{position:absolute;top:12px;left:14px;right:14px;display:flex;align-items:center;gap:12px;pointer-events:none;color:#e2edc5;font:11px var(--mono);text-shadow:0 1px 3px #000}
+.combat-hud button{display:none;pointer-events:auto;background:#17251ee8;border:1px solid #73895b;border-radius:6px;color:var(--lime);padding:10px 12px;margin-left:auto;min-height:44px}
+.in-battle .field-top-label{display:none}
+.boss-health{position:absolute;top:48px;left:50%;transform:translateX(-50%);width:min(380px,65%);padding:8px 12px;border:1px solid #ad81477a;border-radius:5px;background:#1f2019e8;pointer-events:none;color:#f1cf8b;text-align:center;font-size:10px}
+.boss-health>div{height:5px;background:#4a3e2d;margin-top:7px;border-radius:3px;overflow:hidden}
+.boss-health i{display:block;height:100%;background:linear-gradient(90deg,#df935b,#f1ce7c);transition:width .1s}
+.touch-ui button,.touch-ui input,.touch-ui select{min-height:44px}
+.touch-ui input,.touch-ui select{font-size:16px}
+.touch-ui .lobby-card{width:min(360px,calc(100% - 24px))}
+.touch-ui.in-battle{overflow:hidden;overscroll-behavior:none}
+.touch-ui.in-battle .arena-panel{position:fixed;inset:0;z-index:5;border:0;border-radius:0;display:flex;flex-direction:column;padding-top:env(safe-area-inset-top);background:#101916}
+.touch-ui.in-battle .arena-toolbar{height:44px;min-height:44px;padding-left:max(14px,env(safe-area-inset-left));padding-right:max(14px,env(safe-area-inset-right))}
+.touch-ui.in-battle .canvas-wrap{flex:1;min-height:0;aspect-ratio:auto;background:radial-gradient(ellipse at center,#2a3825,#101916);width:100%}
+.touch-ui.in-battle #battlefield{width:100%;height:calc(100% - 164px - env(safe-area-inset-bottom));object-fit:contain;margin:auto}
+.touch-ui.in-battle .controls-strip,.touch-ui.in-battle .field-bottom-label{display:none}
+.touch-ui.in-battle .combat-hud button{display:block}
+.touch-ui.in-battle .combat-hud{top:4px;left:max(12px,env(safe-area-inset-left));right:max(12px,env(safe-area-inset-right));font-size:10px;gap:8px}
+.touch-ui.in-battle .touch-controls{display:flex;position:absolute;bottom:max(10px,env(safe-area-inset-bottom));left:max(16px,env(safe-area-inset-left));right:max(16px,env(safe-area-inset-right));justify-content:space-between;align-items:center;pointer-events:none;user-select:none;-webkit-user-select:none}
+.stick-group{display:flex;flex-direction:column;align-items:center;gap:8px;color:#b2c49a;font-size:11px;letter-spacing:2px}
+.touch-stick{width:116px;height:116px;border-radius:50%;border:1px solid #91ab6175;background:radial-gradient(circle,#60734930 0 38%,#253324a8 39% 62%,#53674428 63%);position:relative;display:grid;place-items:center;touch-action:none;pointer-events:auto;box-shadow:inset 0 0 24px #0d1b16aa}
+.touch-stick.engaged{border-color:#d3ee89;box-shadow:0 0 24px #d3ee891a}
+.aim-stick{border-color:#c59a6f70;background:radial-gradient(circle,#95694630 0 38%,#322b22a8 39% 62%,#74573c28 63%)}
+.aim-stick.engaged{border-color:#f2c181}
+.stick-cross{font:46px var(--mono);color:#8ea86c40;pointer-events:none}
+.stick-knob{position:absolute;width:43px;height:43px;border:1px solid #c8dc9da0;background:#9ab36c6b;border-radius:50%;box-shadow:0 3px 12px #0004;pointer-events:none}
+.aim-stick .stick-knob{background:#c1936278;border-color:#e4c397b0}
+.touch-hint{color:#7f9678;text-align:center;font-size:9px;line-height:1.9;letter-spacing:1px}
+.battle-paused .touch-controls{visibility:hidden}
+.pause-overlay,.lobby-overlay{z-index:3}
+.touch-ui .pause-card{max-width:calc(100% - 40px)}
+.touch-ui .respawn-banner{bottom:180px;font-size:11px;white-space:normal;width:max-content;max-width:90%;text-align:center;padding:12px}
+.touch-ui .wave-banner{font-size:20px;padding:18px 10px}
+.touch-ui .toast{bottom:max(20px,env(safe-area-inset-bottom));z-index:10}
+@media(max-width:600px){
+  .touch-ui:not(.in-battle) .canvas-wrap{min-height:570px}
+  .touch-ui .sidebar{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+  .touch-ui .vehicle-preview canvas{max-width:100%;object-fit:contain}
+  .touch-ui .vehicle-badge{font-size:8px;padding:3px;right:0}
+  .touch-ui .intro h1{font-size:16px}
+}
+@media(orientation:landscape){
+  .touch-ui.in-battle .arena-panel{width:100vw;height:100vh;height:100dvh;padding:0}
+  .touch-ui.in-battle .arena-toolbar{position:absolute;top:env(safe-area-inset-top);left:50%;transform:translateX(-50%);width:min(55vw,550px);height:30px;min-height:30px;border:0;background:#10201880;z-index:1;border-radius:0 0 8px 8px}
+  .touch-ui.in-battle .arena-toolbar .map-tag,.touch-ui.in-battle #pause-button{display:none}
+  .touch-ui.in-battle .arena-meta{gap:10px}
+  .touch-ui.in-battle .canvas-wrap{height:100vh;height:100dvh;flex:none}
+  .touch-ui.in-battle #battlefield{width:100%;height:100%;margin:0;object-fit:contain}
+  .touch-ui.in-battle .touch-controls{bottom:max(14px,env(safe-area-inset-bottom));left:max(12px,env(safe-area-inset-left));right:max(12px,env(safe-area-inset-right))}
+  .touch-ui.in-battle .touch-hint{display:none}
+  .touch-ui.in-battle .combat-hud{right:max(8px,env(safe-area-inset-right));left:max(8px,env(safe-area-inset-left));align-items:flex-start}
+  .touch-ui.in-battle #combat-health{max-width:120px;line-height:1.8}
+  .touch-ui.in-battle #combat-buffs{position:absolute;top:48px;left:0;max-width:116px}
+  .touch-ui.in-battle .boss-health{top:calc(34px + env(safe-area-inset-top));width:min(300px,40%);padding:5px 8px}
+  .touch-ui.in-battle .respawn-banner{bottom:10px;max-width:55%}
+}
+.touch-ui.in-battle .combat-hud{padding-top:env(safe-area-inset-top)}
+.arena-panel:fullscreen{width:100vw;height:100vh;height:100dvh;margin:0}
+.arena-panel:fullscreen .canvas-wrap{height:100%;width:100%}
+.arena-panel:fullscreen #battlefield{object-fit:contain}
+

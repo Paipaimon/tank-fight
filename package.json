@@ -1,11 +1,10 @@
 {
   "name": "tank-field",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "private": true,
   "description": "HTML Canvas 随机关卡多人合作坦克大战",
   "scripts": {
-    "start": "node server.js",
-    "test": "node --test engine.test.js network.test.js server.test.js"
+    "start": "node server.js"
   },
   "engines": { "node": ">=18" },
   "license": "UNLICENSED"
